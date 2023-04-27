@@ -158,3 +158,11 @@ class ImageClassifier(BaseClassifier):
         res = self.head.simple_test(x, **kwargs)
 
         return res
+    def forward_dummy(self, img):
+        outs = self.backbone.forward_dummy(img)
+        if isinstance(outs, tuple):
+            outs = outs[-1]
+        if isinstance(outs, list):
+            outs = sum(outs) / float(len(outs))
+
+        return outs

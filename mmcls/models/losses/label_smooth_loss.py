@@ -28,6 +28,8 @@ class LabelSmoothLoss(nn.Module):
         reduction (str): The method used to reduce the loss.
             Options are "none", "mean" and "sum". Defaults to 'mean'.
         loss_weight (float):  Weight of the loss. Defaults to 1.0.
+        class_weight (torch.Tensor, optional): The weight for each class with
+            shape (C), C is the number of classes. Default None.
 
     Notes:
         if the mode is "original", this will use the same label smooth method
@@ -57,7 +59,8 @@ class LabelSmoothLoss(nn.Module):
                  num_classes=None,
                  mode='original',
                  reduction='mean',
-                 loss_weight=1.0):
+                 loss_weight=1.0,
+                 class_weight=None):
         super().__init__()
         self.num_classes = num_classes
         self.loss_weight = loss_weight
@@ -83,10 +86,10 @@ class LabelSmoothLoss(nn.Module):
         if mode == 'classy_vision':
             self._eps = label_smooth_val / (1 + label_smooth_val)
         if mode == 'multi_label':
-            self.ce = CrossEntropyLoss(use_sigmoid=True)
+            self.ce = CrossEntropyLoss(use_sigmoid=True, class_weight=class_weight)
             self.smooth_label = self.multilabel_smooth_label
         else:
-            self.ce = CrossEntropyLoss(use_soft=True)
+            self.ce = CrossEntropyLoss(use_soft=True, class_weight=class_weight)
             self.smooth_label = self.original_smooth_label
 
     def generate_one_hot_like_label(self, label):

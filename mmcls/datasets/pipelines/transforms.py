@@ -1,11 +1,11 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-import copy
 import inspect
 import math
 import random
 from numbers import Number
 from typing import Sequence
 
+import cv2
 import mmcv
 import numpy as np
 
@@ -614,58 +614,6 @@ class RandomErasing(object):
 
 
 @PIPELINES.register_module()
-class Pad(object):
-    """Pad images.
-
-    Args:
-        size (tuple[int] | None): Expected padding size (h, w). Conflicts with
-                pad_to_square. Defaults to None.
-        pad_to_square (bool): Pad any image to square shape. Defaults to False.
-        pad_val (Number | Sequence[Number]): Values to be filled in padding
-            areas when padding_mode is 'constant'. Default to 0.
-        padding_mode (str): Type of padding. Should be: constant, edge,
-            reflect or symmetric. Default to "constant".
-    """
-
-    def __init__(self,
-                 size=None,
-                 pad_to_square=False,
-                 pad_val=0,
-                 padding_mode='constant'):
-        assert (size is None) ^ (pad_to_square is False), \
-            'Only one of [size, pad_to_square] should be given, ' \
-            f'but get {(size is not None) + (pad_to_square is not False)}'
-        self.size = size
-        self.pad_to_square = pad_to_square
-        self.pad_val = pad_val
-        self.padding_mode = padding_mode
-
-    def __call__(self, results):
-        for key in results.get('img_fields', ['img']):
-            img = results[key]
-            if self.pad_to_square:
-                target_size = tuple(
-                    max(img.shape[0], img.shape[1]) for _ in range(2))
-            else:
-                target_size = self.size
-            img = mmcv.impad(
-                img,
-                shape=target_size,
-                pad_val=self.pad_val,
-                padding_mode=self.padding_mode)
-            results[key] = img
-            results['img_shape'] = img.shape
-        return results
-
-    def __repr__(self):
-        repr_str = self.__class__.__name__
-        repr_str += f'(size={self.size}, '
-        repr_str += f'(pad_val={self.pad_val}, '
-        repr_str += f'padding_mode={self.padding_mode})'
-        return repr_str
-
-
-@PIPELINES.register_module()
 class Resize(object):
     """Resize images.
 
@@ -673,49 +621,35 @@ class Resize(object):
         size (int | tuple): Images scales for resizing (h, w).
             When size is int, the default behavior is to resize an image
             to (size, size). When size is tuple and the second value is -1,
-            the image will be resized according to adaptive_side. For example,
-            when size is 224, the image is resized to 224x224. When size is
-            (224, -1) and adaptive_size is "short", the short side is resized
-            to 224 and the other side is computed based on the short side,
-            maintaining the aspect ratio.
-        interpolation (str): Interpolation method. For "cv2" backend, accepted
-            values are "nearest", "bilinear", "bicubic", "area", "lanczos". For
-            "pillow" backend, accepted values are "nearest", "bilinear",
-            "bicubic", "box", "lanczos", "hamming".
+            the short edge of an image is resized to its first value.
+            For example, when size is 224, the image is resized to 224x224.
+            When size is (224, -1), the short side is resized to 224 and the
+            other side is computed based on the short side, maintaining the
+            aspect ratio.
+        interpolation (str): Interpolation method, accepted values are
+            "nearest", "bilinear", "bicubic", "area", "lanczos".
             More details can be found in `mmcv.image.geometric`.
-        adaptive_side(str): Adaptive resize policy, accepted values are
-            "short", "long", "height", "width". Default to "short".
         backend (str): The image resize backend type, accepted values are
             `cv2` and `pillow`. Default: `cv2`.
     """
 
-    def __init__(self,
-                 size,
-                 interpolation='bilinear',
-                 adaptive_side='short',
-                 backend='cv2'):
+    def __init__(self, size, interpolation='bilinear', backend='cv2'):
         assert isinstance(size, int) or (isinstance(size, tuple)
                                          and len(size) == 2)
-        assert adaptive_side in {'short', 'long', 'height', 'width'}
-
-        self.adaptive_side = adaptive_side
-        self.adaptive_resize = False
+        self.resize_w_short_side = False
         if isinstance(size, int):
             assert size > 0
             size = (size, size)
         else:
             assert size[0] > 0 and (size[1] > 0 or size[1] == -1)
             if size[1] == -1:
-                self.adaptive_resize = True
+                self.resize_w_short_side = True
+        assert interpolation in ('nearest', 'bilinear', 'bicubic', 'area',
+                                 'lanczos')
         if backend not in ['cv2', 'pillow']:
             raise ValueError(f'backend: {backend} is not supported for resize.'
                              'Supported backends are "cv2", "pillow"')
-        if backend == 'cv2':
-            assert interpolation in ('nearest', 'bilinear', 'bicubic', 'area',
-                                     'lanczos')
-        else:
-            assert interpolation in ('nearest', 'bilinear', 'bicubic', 'box',
-                                     'lanczos', 'hamming')
+
         self.size = size
         self.interpolation = interpolation
         self.backend = backend
@@ -724,29 +658,19 @@ class Resize(object):
         for key in results.get('img_fields', ['img']):
             img = results[key]
             ignore_resize = False
-            if self.adaptive_resize:
+            if self.resize_w_short_side:
                 h, w = img.shape[:2]
-                target_size = self.size[0]
-
-                condition_ignore_resize = {
-                    'short': min(h, w) == target_size,
-                    'long': max(h, w) == target_size,
-                    'height': h == target_size,
-                    'width': w == target_size
-                }
-
-                if condition_ignore_resize[self.adaptive_side]:
+                short_side = self.size[0]
+                if (w <= h and w == short_side) or (h <= w
+                                                    and h == short_side):
                     ignore_resize = True
-                elif any([
-                        self.adaptive_side == 'short' and w < h,
-                        self.adaptive_side == 'long' and w > h,
-                        self.adaptive_side == 'width',
-                ]):
-                    width = target_size
-                    height = int(target_size * h / w)
                 else:
-                    height = target_size
-                    width = int(target_size * w / h)
+                    if w < h:
+                        width = short_side
+                        height = int(short_side * h / w)
+                    else:
+                        height = short_side
+                        width = int(short_side * w / h)
             else:
                 height, width = self.size
             if not ignore_resize:
@@ -799,8 +723,8 @@ class CenterCrop(object):
           to perform the center crop with the ``crop_size_`` as:
 
         .. math::
-            \text{crop_size_} = \frac{\text{crop_size}}{\text{crop_size} +
-            \text{crop_padding}} \times \text{short_edge}
+            \text{crop\_size\_} = \frac{\text{crop\_size}}{\text{crop\_size} +
+            \text{crop\_padding}} \times \text{short\_edge}
 
         And then the pipeline resizes the img to the input crop size.
     """
@@ -1118,22 +1042,18 @@ class Albu(object):
         return updated_dict
 
     def __call__(self, results):
-
-        # backup gt_label in case Albu modify it.
-        _gt_label = copy.deepcopy(results.get('gt_label', None))
-
         # dict to albumentations format
         results = self.mapper(results, self.keymap_to_albu)
 
-        # process aug
         results = self.aug(**results)
+
+        if 'gt_labels' in results:
+            if isinstance(results['gt_labels'], list):
+                results['gt_labels'] = np.array(results['gt_labels'])
+            results['gt_labels'] = results['gt_labels'].astype(np.int64)
 
         # back to the original format
         results = self.mapper(results, self.keymap_back)
-
-        if _gt_label is not None:
-            # recover backup gt_label
-            results.update({'gt_label': _gt_label})
 
         # update final shape
         if self.update_pad_shape:
@@ -1144,3 +1064,111 @@ class Albu(object):
     def __repr__(self):
         repr_str = self.__class__.__name__ + f'(transforms={self.transforms})'
         return repr_str
+
+
+@PIPELINES.register_module()
+class Pad(object):
+    def __init__(self,  size=160, padding_mode='edge'):
+        assert isinstance(size, int) or (isinstance(size, tuple)
+                                         and len(size) == 2)
+        if isinstance(size, int):
+            assert size > 0
+            size = (size, size)
+        else:
+            assert size[0] > 0 and size[1] > 0
+        # check padding mode
+        assert padding_mode in ['constant', 'edge', 'reflect', 'symmetric']
+        self.size = size
+        self.padding_mode = padding_mode
+
+    def _pad_img(self, results):
+        for key in results.get('img_fields', ['img']):
+            img = results[key]
+            old_size = img.shape[:2]
+            pad_w = self.size[1] - old_size[1]
+            pad_h = self.size[0] - old_size[0]
+            top, bottom = pad_h//2, pad_h-(pad_h//2)
+            left, right = pad_w//2, pad_w-(pad_w//2)
+            img = mmcv.impad(img,
+                             padding=(top, bottom, left, right),
+                             padding_mode=self.padding_mode)
+            results[key] = img
+            results['img_shape'] = img.shape
+
+    def __call__(self, results):
+        self._pad_img(results)
+        return results
+
+    def __repr__(self):
+        repr_str = self.__class__.__name__
+        repr_str += f'(size={self.size}, '
+        repr_str += f'padding_mode={self.padding_mode})'
+        return repr_str
+
+@PIPELINES.register_module()
+class ResizeOrResizePad(Resize, Pad):
+    def __init__(self, size, pad_size, resize, prob=5/7, padding_mode='edge', interpolation='bilinear', backend='cv2'):
+        Resize.__init__(self, size=size, interpolation=interpolation, backend=backend)
+        Pad.__init__(self, size=pad_size, padding_mode=padding_mode)
+        assert isinstance(size, int) and isinstance(resize, int) or (isinstance(size, tuple)
+                                         and len(size) == 2) or (isinstance(resize, tuple)
+                                         and len(resize) == 2)
+        if isinstance(size, int) and isinstance(resize, int):
+            assert (size > 0) and (resize > 0)
+            size = (size, size)
+            resize = (resize, resize)
+        else:
+            assert size[0] > 0 and (size[1] > 0 or size[1] == -1)
+            assert resize[0] > 0 and (resize[1] > 0 or resize[1] == -1)
+
+        self.prob = prob
+        self.img_size = size
+        self.resize = resize
+
+    def __call__(self, results):
+        prob_gen = np.random.rand()
+        blur_prob = np.random.rand()
+        if prob_gen > self.prob:
+            self.size = self.resize
+            self._resize_img(results)
+            img = results['img']
+            # mmcv.imwrite(results['img'], './img/resize_mode_before_blur.jpg')
+            if blur_prob < 0.7:
+                img = cv2.blur(img, (9, 9))
+            else:
+                img = cv2.blur(img, (12, 12))
+            results['img'] = img
+            # mmcv.imwrite(results['img'], './img/resize_mode.jpg')
+        else:
+            self.size = self.img_size
+            self._resize_img(results)
+            # mmcv.imwrite(results['img'], './img/resize_pad_mode_resize.jpg')
+            self.size = self.resize
+            self._pad_img(results)
+            img = results['img']
+            # mmcv.imwrite(results['img'], './img/resize_pad_mode_pad_before_blur.jpg')
+            if blur_prob < 0.7:
+                img = cv2.blur(img, (3, 3))
+            else:
+                img = cv2.blur(img, (5, 5))
+            results['img'] = img
+            # mmcv.imwrite(results['img'], './img/resize_pad_mode_pad.jpg')
+        return results
+
+
+@PIPELINES.register_module()
+class ImgBlur(object):
+    def __init__(self, prob=0.1):
+        super().__init__()
+        self.prob = prob
+
+    def __call__(self, results):
+        blur_prob = np.random.rand()
+        img = results['img']
+        if blur_prob < self.prob:
+            img = cv2.blur(img, (9, 9))
+        else:
+            img = cv2.blur(img, (12, 12))
+        results['img'] = img
+
+        return results

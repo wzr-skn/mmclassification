@@ -256,7 +256,8 @@ class ImshowInfosContextManager(BaseFigureContextManager):
         for k, v in infos.items():
             if isinstance(v, float):
                 v = f'{v:.2f}'
-            label_text = f'{k}: {v}'
+            # label_text = f'{k}: {v}'
+            label_text = f'{v}'
             self._put_text(self.ax_save, label_text, x, y, text_color,
                            font_size)
             if show and not self.is_inline:
