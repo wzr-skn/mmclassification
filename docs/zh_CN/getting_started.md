@@ -39,7 +39,8 @@ mmclassification
 
 对于 MNIST，CIFAR10 和 CIFAR100，程序将会在需要的时候自动下载数据集。
 
-对于用户自定义数据集的准备，请参阅 [教程 2：如何增加新数据集](tutorials/new_dataset.md)
+对于用户自定义数据集的准备，请参阅 [教程 3：如何自定义数据集
+](tutorials/new_dataset.md)
 
 ## 使用预训练模型进行推理
 
@@ -86,7 +87,7 @@ python tools/test.py ${CONFIG_FILE} ${CHECKPOINT_FILE} [--metrics ${METRICS}] [-
 
 例子：
 
-在 ImageNet 验证集上，使用 ResNet-50 进行推理并获得预测标签及其对应的预测得分。
+在 CIFAR10 验证集上，使用 ResNet-50 进行推理并获得预测标签及其对应的预测得分。
 
 ```shell
 python tools/test.py configs/resnet/resnet50_8xb16_cifar10.py \
