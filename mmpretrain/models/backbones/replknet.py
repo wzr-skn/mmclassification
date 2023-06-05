@@ -467,6 +467,13 @@ class RepLKNet(BaseBackbone):
     """
 
     arch_settings = {
+        '31t_shallow':
+        dict(
+            large_kernel_sizes=[31, 29, 27, 13],
+            layers=[2, 2, 6, 2],
+            channels=[48, 96, 192, 384],
+            small_kernel=5,
+            dw_ratio=1),
         '31B':
         dict(
             large_kernel_sizes=[31, 29, 27, 13],

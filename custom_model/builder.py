@@ -1,5 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
-from mmcls.models import BACKBONES, NECKS, HEADS, LOSSES, CLASSIFIERS
+from mmpretrain.models import BACKBONES, NECKS, HEADS, LOSSES, CLASSIFIERS
 
 
 def build_backbone(cfg):
