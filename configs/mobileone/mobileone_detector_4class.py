@@ -4,6 +4,7 @@ model = dict(
         type='MobileOne',
         arch='s0',
         out_indices=(3, ),
+        _scope_='mmpretrain',
     ),
     neck=dict(type='GlobalAveragePooling'),
     head=dict(
@@ -16,7 +17,8 @@ model = dict(
             mode='original',
         ),
         topk=(1, 5),
-    ))
+    ),
+    _scope_='mmpretrain',)
 # model settings
 # import mmcv.runner.hooks.evaluation
 
